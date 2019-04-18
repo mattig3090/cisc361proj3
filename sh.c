@@ -1,4 +1,4 @@
-//Anthony Sette
+//Anthony Sette and Matthew Grossman
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
@@ -12,7 +12,10 @@
 #include <signal.h>
 #include <errno.h>
 #include <glob.h>
-#include "sh.h" 
+#include "sh.h"
+#include <utmpx.h>
+#include "wm_list.h"
+#include "wu_list.h"
 
 #define buf 1024 //buf size
 #define max 2048 //max size
@@ -29,6 +32,7 @@ int sh( int argc, char **argv, char **envp )
   char *homedir;
   struct pathelement *pathlist;
   char * prev_enviornment = malloc(sizeof(prev_enviornment)); 
+  bool firstTime = TRUE; // Indicates if this is the first time that watchuser is
 
   // get user and pass then start in home dir
   uid = getuid(); //get uid
@@ -248,6 +252,10 @@ int sh( int argc, char **argv, char **envp )
         perror("setenv");
       }
     }
+    //watchuser
+    else if(strcmp(args[0], "watchuser") == 0){
+
+    }
 
     //If the argument is not built in, the process is forked. This allows the process to be run on the terminal through mysh.
     else{
@@ -259,9 +267,15 @@ int sh( int argc, char **argv, char **envp )
       if (p == ""){   //if which doesnt find the process don't fork it.
         printf("\n");
       }
-      else if (p != ""){
+      else if (p != ""){ // means that the "which" command found the process and we can fork it 
         pid = fork(); //fork it
-        if (pid == 0){
+        bool isBack = FALSE; // our verification that we are either running a process in the foreground or background 
+        if(strcmp(args[argc - 1], "&") == 0){
+          isBack = TRUE; // sets our background flag to TRUE
+          args[argc-1] = NULL; // and then gets rid of the ampersand, that way we can just pass the argument into the background process... thing...
+          argc--;
+        } // means that we have a & at the end of the commandline, so this process is going to be run in the background
+        if (pid == 0){ // means that we are in the child process
           int status;
           if (strcmp("ls", args[0]) == 0 && wildcardhelper(args_to_string(args, argsct)) == 1){
             int l=1;
@@ -317,18 +331,18 @@ int sh( int argc, char **argv, char **envp )
               l++;
             }
           }
-
+          else if()
           else {
-            status = execvp(p, args);
+            status = execvp(p, args); // run the external command with the arguments
           }
-          if (status != -1){
+          if (status != -1){ // as long as there is no error with executing the command
             printf("Executing %s\n", args[0]);
           }
-          if (status == -1){
+          if (status == -1){ // means there was an error in executing the command
             exit(EXIT_FAILURE);
           }
         }
-        else if (pid > 0){
+        else if (pid > 0){ // means that this is the parent process
           int childStat;
           waitpid(pid, &childStat, 0);
         }
@@ -630,4 +644,15 @@ char * args_to_string(char ** args, int argsct){
     i = i + 1;
   }
   return command;
+}
+void watchuser(char ** args){ // passing a parameter of "args" enables us to not worry about fitting the program specifically to the arguments
+  struct utmpx *u_entry;
+
+  setutxent();
+  while(u_entry = getutxent()){
+    if(u_entry->ut_type == USER_PROCESS){
+      printf("%s has logged on %s from %s\n", u_entry->ut_user, u_entry->ut_line, u_entry->ut_host);
+    }
+
+  }
 }

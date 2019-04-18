@@ -22,6 +22,7 @@ void sigintHandler(int sig_num);
 void signalSTPHandler(int sig_num);
 char *list_wildcard (char *dir, char *wildcard);
 char *args_to_string(char **args, int arg_count);
+void watchuser(char **args);
 
 #define PROMPTMAX 32
 #define MAXARGS 10
