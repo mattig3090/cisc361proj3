@@ -11,6 +11,7 @@
 #include <sys/wait.h>
 #include <sys/time.h>
 #include <signal.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <errno.h>
@@ -53,7 +54,14 @@ int sh( int argc, char **argv, char **envp )
     perror("getcwd");
     exit(2);
   }
-
+  struct sigaction si;
+  si.sa_handler = &sig_child_handler;
+  sigemptyset(&si.sa_mask);
+  si.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+  if(sigaction(SIGCHLD, &si, 0) == -1){
+    perror(0);
+    exit(1);
+  }
   owd = calloc(strlen(pwd) + 1, sizeof(char));
   memcpy(owd, pwd, strlen(pwd));
   prompt[0] = ' '; prompt[1] = '\0'; //initial prompt
@@ -491,7 +499,13 @@ int sh( int argc, char **argv, char **envp )
               l++;
             }
           }
-          else if()
+          if(isBack){ // means that this process is going to be run in the background
+            fclose(stdin);
+            open("/dev/null", O_RDONLY);
+            execvp(*args, args);
+            fprintf(stderr, "unknown command: %s\n", args[0]);
+            exit(1);
+          }
           else {
             status = execvp(p, args); // run the external command with the arguments
           }
@@ -503,8 +517,12 @@ int sh( int argc, char **argv, char **envp )
           }
         }
         else if (pid > 0){ // means that this is the parent process
-          int childStat;
-          waitpid(pid, &childStat, 0);
+          if(isBack){
+            printf("starting background job %d\n", pid);
+          }
+          else{
+            waitpid(pid, &status, 0);
+          }
         }
         else{ //error
           perror("Command not found.");
@@ -864,5 +882,11 @@ void watchmail(char *name){
         }
       }
     }
+  }
+}
+void sig_child_handler(int sig){
+  int s_err = errno; // This is the error associated with the signal
+  while(waitpid((pid_t)(-1), 0, WNOHANG) > 0){
+    errno = s_err;
   }
 }
