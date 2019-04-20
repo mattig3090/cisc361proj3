@@ -9,7 +9,10 @@
 #include <dirent.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/time.h>
 #include <signal.h>
+#include <sys/stat.h>
+#include <time.h>
 #include <errno.h>
 #include <glob.h>
 #include "sh.h"
@@ -32,7 +35,13 @@ int sh( int argc, char **argv, char **envp )
   char *homedir;
   struct pathelement *pathlist;
   char * prev_enviornment = malloc(sizeof(prev_enviornment)); 
-  bool firstTime = TRUE; // Indicates if this is the first time that watchuser is
+  bool firstTime = TRUE; // Indicates if this is the first time that watchuser is being run
+  pthread_mutex_t user_lock;
+
+  struct watchuser_list *uh; // watchuser linked list head
+  struct watchuser_list *ut; // watchuser linked list tail
+  struct watchmail_list *mh; // watchmail linked list head
+  struct watchmail_list *mt; // watchmail linked list tail
 
   // get user and pass then start in home dir
   uid = getuid(); //get uid
@@ -253,8 +262,159 @@ int sh( int argc, char **argv, char **envp )
       }
     }
     //watchuser
-    else if(strcmp(args[0], "watchuser") == 0){
-
+    else if(strcmp(args[0], "watchuser") == 0){ // this should handle adding and removing the users, watchuser ITSELF should just track whether somebody has logged on or not 
+      printf("Executing built-in %s\n", args[0]);
+      pthread_t wat_thread;
+      if(argsct > 3){ // we can only have as many as three arguments. If this is run with no arguments, then we just print the list starting at the most recent user
+        fprintf(stderr, "Invalid argument count for function %s\n", args[0]);
+      }
+      else if(argsct == 2){
+        if(firstTime){ // means this is the first time watchuser is being run in this program
+          pthread_create(&wat_thread, NULL, "watchuser", "User Thread");
+          !firstTime;
+        }
+        else{ // then we just want to add a user to the linked list
+          pthread_mutex_lock(&user_lock);
+          struct watchuser_list *user = malloc(sizeof(struct watchuser_list)); // since the node is a pointer, we need space for it
+          user->node = malloc(sizeof(args[1])); // set the amount of space the user value has to be whatever the size of our username is
+          strcpy(user->node, args[1]); // set the value of the node in the user to be the username that is passed into the command line
+          if(uh == NULL){ // If there is no head, that means there is nothing in the linked list yet
+            uh = user;
+            ut = user; // also, if this case is fulfilled, since there is only one node, that node is both the head, and the tail
+          }
+          else{ // means there is at least one node in the list, and we can add this next node as normal, meaning it goes to the end of the list
+            ut->next = user; // set the new end of the list (this being the node after the tail) to be the new user node
+            user->prev = ut; // sets the tail to now be the node BEFORE THE TAIL
+            ut = user; // has the tail pointer now point to the new user node that was just created
+          }
+          pthread_mutex_unlock(&user_lock); // now that we are done editing the linked list, we can get rid of our lock!
+        }
+      } // means that we just have the function call and then the username we want to track
+      else if(argsct == 3){ // all this means is that we have the second optional argument, that being "off", meaning we are removing a user
+        if(strcmp(args[2], "off") == 0){ // this means WE WANT TO GET RID OF A USER
+          pthread_mutex_lock(&user_lock); // lock the process so nothing gets out by accident
+          struct watchuser_list *t; // Creating this will allow us to do our moving around later on!
+          // we will want to first check and see if we are either removing the head or the tail, and then if we are removing the head, if this is the last node in the entire list
+          t = uh; // Since we have to go through the list to check which node we are removing, might as well start from the top, and search through to the end
+          bool userThere = TRUE; // this is for our while loop. Since a user can only be added to the watch list once, when we remove that user, we don't have to go through any further than that, so we can stop searching once the user is removed
+          while(userThere){ // Until we delete the specified user. We will also add a case in which we get to the end of the list and the user turns out to not be in the list, though if the program is used correctly we won't reach that condition
+            if(strcmp(t->node, args[1]) == 0){ // means the node that we are currently on is the one we want to remove
+              if(strcmp(t->node, uh->node) == 0){
+                if(t->next != NULL){
+                  uh = uh->next; // sets the head to be the node AFTER the OLD HEAD, that way we can just remove the temp node and be done with it!
+                } // means the head is NOT the only node left in the list
+                else{
+                  uh = NULL;
+                  ut = NULL;
+                } // means that the head is the final node in the list. Since the temp pointer is already pointing to the header node, we can set the header and tail pointers to NULL, and then just free the temp pointer
+              }
+              else if(strcmp(t->node, ut->node) == 0){ // means that the tail is the node we want to remove, so we need to move the tail pointer so that we can remove the temp node without causing any issues
+                ut = ut->prev; // sets the new tail pointer to be to the node BEFORE the OLD TAIL
+              }
+              else{ // means we aren't in the beginning of the list, or the end. Just somewhere in the middle
+                t->prev->next = t->next; // sets it so the "next" pointer of the node preceding the node about to be deleted is now set to the node AFTER the temp node
+                t->next->prev = t->prev; // sets it so the "prev" pointer of the node succeeding the node about to be deleted is now set to the node BEFORE the temp node
+              }
+              free(temp->node);
+              free(temp);
+              userThere = FALSE; // Get rid of the temp node, and change our "user still there" boolean to reflect that the user is now not on the list anymore
+            }
+            else{ // means that the current node we are on is NOT the node that we want to delete, so we just move on to the next node
+              if(t->next == NULL){ // if we have reached the end of the list, just print that the user isn't in the list and move on
+                printf("User is not in the Watch List\n");
+                userThere = FALSE;
+              }
+              else{ // means we aren't at the end of the list, so we just move on to the next node
+                t = t->next;
+              }
+            }
+          }
+          pthread_mutex_unlock(&user_lock);
+        }
+        else{
+          fprintf(stderr, "Included three arguments without removing a user \n");
+        }
+      }
+      else{
+        struct watchuser_list *curr = ut;
+        while(ut != NULL){
+          printf("%s\n", curr->node);
+          curr = curr->prev;
+        }
+      }
+    }
+    //watchmail
+    else if(strcmp(args[0], "watchmail") == 0){
+      printf("Executing built-in %s\n", args[0]);
+      if(argsct == 1 || argsct > 3){
+        fprintf(stderr, "Invalid argument count\n");
+      }
+      else if(argsct == 2){ // means we have the file name. Need to make sure it exists, and then we can add it
+        if(access(args[1], F_OK) == -1){ // if the file doesn't exist
+          fprintf(stderr, "File does not exist\n");
+        }
+        else{
+          struct watchmail_list *mail = malloc(sizeof(struct watchmail_list));
+          mail->node = malloc(sizeof(args[1]));
+          pthread_t *track;
+          strcpy(mail->node, args[1]);
+          if(mh == NULL){ // if we are adding the first node
+            mh = mail;
+            mt = mail; // since the first node is technically both the beginning and the end
+            mail->next = NULL;
+          }
+          else{
+            mt->next = mail;
+            mail->prev = mt;
+            mt = mail;
+          }
+          pthread_create(&track, NULL, watchmail, args[1]); // create the thread to track the file
+        }
+        else if(argsct == 3){ // means we are going to stop tracking mails for a file
+          if(strcmp(args[2], "off") == 0){
+            struct watchmail_list *tmp;
+            bool stillThere = TRUE; // checking if the mail has been deleted yet
+            tmp = mh;
+            pthread_cancel(&track);
+            while(stillThere){
+              if(strcmp(args[1], tmp->node) == 0){ // means this is the node we want to get rid of
+                if(tmp == mh){
+                  if(tmp->next == NULL){
+                    mh = NULL;
+                    mt = NULL;
+                  }
+                  else{ // means the head isn't the last node left
+                    mh = mh->next;
+                  }
+                }
+                else if(tmp == mt){ // if the node is the tail
+                  mt = mt->prev;
+                  mt->next == NULL;
+                }
+                else{ // means the node is in the middle
+                  tmp->next->prev = tmp->prev;
+                  tmp->prev->next = tmp->next;
+                }
+                free(tmp->node);
+                free(tmp);
+                stillThere = FALSE;
+              }
+              else{ // means this isn't the node we are looking for, and we move on
+                if(tmp->next == NULL && stillThere){
+                  printf("Node not found in list\n");
+                  stillThere = FALSE;
+                }
+                else{
+                  tmp = tmp->next;
+                }
+              }
+            }
+          }
+          else{
+            fprintf(stderr, "If inputting two arguments to function %s, can only have "off" as the last argument", args[0]);
+          }
+        }
+      }
     }
 
     //If the argument is not built in, the process is forked. This allows the process to be run on the terminal through mysh.
@@ -645,14 +805,64 @@ char * args_to_string(char ** args, int argsct){
   }
   return command;
 }
-void watchuser(char ** args){ // passing a parameter of "args" enables us to not worry about fitting the program specifically to the arguments
-  struct utmpx *u_entry;
-
-  setutxent();
-  while(u_entry = getutxent()){
-    if(u_entry->ut_type == USER_PROCESS){
-      printf("%s has logged on %s from %s\n", u_entry->ut_user, u_entry->ut_line, u_entry->ut_host);
+void watchuser(char ** args){
+  struct utmpx *up;
+  while(1){ // run infinitely
+    sleep(20);
+    setutxent();
+    while(up = getutxent()){
+      if(up->ut_type == USER_PROCESS){ // means this is the process we want to look in
+        pthread_mutex_lock(&user_lock);
+        struct watchuser_list *t = uh;
+        while(t != NULL){
+          if(strcmp(t->node, up->ut_user) == 0){ // means this is the user we want the log-on info about 
+            printf("%s has logged on %s from %s\n", up->ut_user, up->ut_line, up->ut_host);
+          }
+          t = t->next;
+        }
+        pthread_mutex_unlock(&user_lock);
+      }
     }
-
+  }
+}
+void watchmail(char *name){
+  const char *fn = name; // this just saves the parameter to a value
+  struct timeval curr; // The struct that will hold the current time and be passed into ctime()
+  int prev_size = 0; // The original, and then most recent size of the file (before the file is checked)
+  struct stat fil;
+  char tims[1024];
+  while(1){
+    sleep(1);
+    struct watchmail_list *n = mh; // we need to search through our list until we find the file we want to see if it was updated
+    bool notFound = TRUE; // tracks whether or not we've found the file we are looking for. This will handle the logic for printing everything too
+    while(notFound){
+      if(strcmp(n->node, name) == 0){
+        fil = stat(fn, &fil);
+        if(prev_size == 0){ // means we don't have the original size of this file
+          prev_size = fil.st_size;
+        } // now that we have the original size, we can check to see if the file size is bigger than it once was, and if it was, then it was changed!!
+        if(fil.st_size > prev_size){ // means the file is different!
+          gettimeofday(&curr, NULL); // the value is saved into "curr"
+          tims = ctime(curr->tv_sec);
+          printf("BEEP\a You've got Mail in %s at %s\n", fn, tims);
+          prev_size = file.st_size;
+          notFound = FALSE;
+        }
+        else{
+          printf("File %s is unchanged\n", fn);
+          notFound = FALSE;
+        }
+      }
+      else{
+        if(n->next == NULL && notFound){
+          printf("File not found\n");
+          notFound = FALSE; // basically means we got to the end of our list and didn't find the file
+          pthread_exit(&exit);
+        }
+        else{
+          n = n->next;
+        }
+      }
+    }
   }
 }
