@@ -17,12 +17,19 @@
 #include <errno.h>
 #include <glob.h>
 #include "sh.h"
+#include <stdbool.h>
 #include <utmpx.h>
 #include "wm_list.h"
 #include "wu_list.h"
 
 #define buf 1024 //buf size
 #define max 2048 //max size
+
+struct watchuser_list *uh = NULL; // watchuser linked list head
+struct watchuser_list *ut = NULL; // watchuser linked list tail
+struct watchmail_list *mh = NULL; // watchmail linked list head
+struct watchmail_list *mt = NULL; // watchmail linked list tail
+pthread_mutex_t user_lock;
 
 int sh( int argc, char **argv, char **envp )
 {
@@ -36,8 +43,7 @@ int sh( int argc, char **argv, char **envp )
   char *homedir;
   struct pathelement *pathlist;
   char * prev_enviornment = malloc(sizeof(prev_enviornment)); 
-  bool firstTime = TRUE; // Indicates if this is the first time that watchuser is being run
-  pthread_mutex_t user_lock;
+  bool firstTime = true; // Indicates if this is the first time that watchuser is being run
 
   struct watchuser_list *uh; // watchuser linked list head
   struct watchuser_list *ut; // watchuser linked list tail
@@ -304,7 +310,7 @@ int sh( int argc, char **argv, char **envp )
           struct watchuser_list *t; // Creating this will allow us to do our moving around later on!
           // we will want to first check and see if we are either removing the head or the tail, and then if we are removing the head, if this is the last node in the entire list
           t = uh; // Since we have to go through the list to check which node we are removing, might as well start from the top, and search through to the end
-          bool userThere = TRUE; // this is for our while loop. Since a user can only be added to the watch list once, when we remove that user, we don't have to go through any further than that, so we can stop searching once the user is removed
+          bool userThere = true; // this is for our while loop. Since a user can only be added to the watch list once, when we remove that user, we don't have to go through any further than that, so we can stop searching once the user is removed
           while(userThere){ // Until we delete the specified user. We will also add a case in which we get to the end of the list and the user turns out to not be in the list, though if the program is used correctly we won't reach that condition
             if(strcmp(t->node, args[1]) == 0){ // means the node that we are currently on is the one we want to remove
               if(strcmp(t->node, uh->node) == 0){
@@ -323,14 +329,14 @@ int sh( int argc, char **argv, char **envp )
                 t->prev->next = t->next; // sets it so the "next" pointer of the node preceding the node about to be deleted is now set to the node AFTER the temp node
                 t->next->prev = t->prev; // sets it so the "prev" pointer of the node succeeding the node about to be deleted is now set to the node BEFORE the temp node
               }
-              free(temp->node);
-              free(temp);
-              userThere = FALSE; // Get rid of the temp node, and change our "user still there" boolean to reflect that the user is now not on the list anymore
+              free(t->node);
+              free(t);
+              userThere = false; // Get rid of the temp node, and change our "user still there" boolean to reflect that the user is now not on the list anymore
             }
             else{ // means that the current node we are on is NOT the node that we want to delete, so we just move on to the next node
               if(t->next == NULL){ // if we have reached the end of the list, just print that the user isn't in the list and move on
                 printf("User is not in the Watch List\n");
-                userThere = FALSE;
+                userThere = false;
               }
               else{ // means we aren't at the end of the list, so we just move on to the next node
                 t = t->next;
@@ -381,7 +387,7 @@ int sh( int argc, char **argv, char **envp )
         else if(argsct == 3){ // means we are going to stop tracking mails for a file
           if(strcmp(args[2], "off") == 0){
             struct watchmail_list *tmp;
-            bool stillThere = TRUE; // checking if the mail has been deleted yet
+            bool stillThere = true; // checking if the mail has been deleted yet
             tmp = mh;
             pthread_cancel(&track);
             while(stillThere){
@@ -405,12 +411,12 @@ int sh( int argc, char **argv, char **envp )
                 }
                 free(tmp->node);
                 free(tmp);
-                stillThere = FALSE;
+                stillThere = false;
               }
               else{ // means this isn't the node we are looking for, and we move on
                 if(tmp->next == NULL && stillThere){
                   printf("Node not found in list\n");
-                  stillThere = FALSE;
+                  stillThere = false;
                 }
                 else{
                   tmp = tmp->next;
@@ -419,7 +425,7 @@ int sh( int argc, char **argv, char **envp )
             }
           }
           else{
-            fprintf(stderr, "If inputting two arguments to function %s, can only have "off" as the last argument", args[0]);
+            fprintf(stderr, "If inputting two arguments to function %s, can only have 'off' as the last argument", args[0]);
           }
         }
       }
@@ -437,9 +443,9 @@ int sh( int argc, char **argv, char **envp )
       }
       else if (p != ""){ // means that the "which" command found the process and we can fork it 
         pid = fork(); //fork it
-        bool isBack = FALSE; // our verification that we are either running a process in the foreground or background 
+        bool isBack = false; // our verification that we are either running a process in the foreground or background 
         if(strcmp(args[argc - 1], "&") == 0){
-          isBack = TRUE; // sets our background flag to TRUE
+          isBack = true; // sets our background flag to true
           args[argc-1] = NULL; // and then gets rid of the ampersand, that way we can just pass the argument into the background process... thing...
           argc--;
         } // means that we have a & at the end of the commandline, so this process is going to be run in the background
@@ -848,33 +854,34 @@ void watchmail(char *name){
   struct timeval curr; // The struct that will hold the current time and be passed into ctime()
   int prev_size = 0; // The original, and then most recent size of the file (before the file is checked)
   struct stat fil;
+  int s;
   char tims[1024];
   while(1){
     sleep(1);
     struct watchmail_list *n = mh; // we need to search through our list until we find the file we want to see if it was updated
-    bool notFound = TRUE; // tracks whether or not we've found the file we are looking for. This will handle the logic for printing everything too
+    bool notFound = true; // tracks whether or not we've found the file we are looking for. This will handle the logic for printing everything too
     while(notFound){
       if(strcmp(n->node, name) == 0){
-        fil = stat(fn, &fil);
+        s = stat(fn, &fil);
         if(prev_size == 0){ // means we don't have the original size of this file
           prev_size = fil.st_size;
         } // now that we have the original size, we can check to see if the file size is bigger than it once was, and if it was, then it was changed!!
         if(fil.st_size > prev_size){ // means the file is different!
           gettimeofday(&curr, NULL); // the value is saved into "curr"
-          tims = ctime(curr->tv_sec);
+          strcpy(tims,ctime(curr.tv_sec));
           printf("BEEP\a You've got Mail in %s at %s\n", fn, tims);
-          prev_size = file.st_size;
-          notFound = FALSE;
+          prev_size = fil.st_size;
+          notFound = false;
         }
         else{
           printf("File %s is unchanged\n", fn);
-          notFound = FALSE;
+          notFound = false;
         }
       }
       else{
         if(n->next == NULL && notFound){
           printf("File not found\n");
-          notFound = FALSE; // basically means we got to the end of our list and didn't find the file
+          notFound = false; // basically means we got to the end of our list and didn't find the file
           pthread_exit(&exit);
         }
         else{

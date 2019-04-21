@@ -23,6 +23,8 @@ void signalSTPHandler(int sig_num);
 char *list_wildcard (char *dir, char *wildcard);
 char *args_to_string(char **args, int arg_count);
 void watchuser(char **args);
+void watchmail(char *name);
+void sig_child_handler(int signal);
 
 #define PROMPTMAX 32
 #define MAXARGS 10
