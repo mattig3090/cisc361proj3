@@ -293,11 +293,12 @@ int sh( int argc, char **argv, char **envp )
         else{ // then we just want to add a user to the linked list
           pthread_mutex_lock(&user_lock);
           struct watchuser_list *user = malloc(sizeof(struct watchuser_list)); // since the node is a pointer, we need space for it
-          user->node = malloc(1024); // set the amount of space the user value has to be whatever the size of our username is
+          user->node = malloc(sizeof(args[1])+1); // set the amount of space the user value has to be whatever the size of our username is
           strcpy(user->node, args[1]); // set the value of the node in the user to be the username that is passed into the command line
-          if(uh == NULL){ // If there is no head, that means there is nothing in the linked list yet
+          user->prev = ut;
+          if(uh == NULL){ // means there is nothing in the head
+            user->next = NULL;
             uh = user;
-            ut = user; // also, if this case is fulfilled, since there is only one node, that node is both the head, and the tail
           }
           else{ // means there is at least one node in the list, and we can add this next node as normal, meaning it goes to the end of the list
             ut->next = user; // set the new end of the list (this being the node after the tail) to be the new user node
@@ -373,17 +374,32 @@ int sh( int argc, char **argv, char **envp )
         }
         else{
           struct watchmail_list *mail = malloc(sizeof(struct watchmail_list));
-          mail->node = malloc(1024);
+          mail->node = malloc(sizeof(args[1])+1);
+          printf("allocated space to mail node!\n");
           strcpy(mail->node, args[1]);
+          printf("Copied information into mail node!\n");
+          mail->prev = mt;
+          printf("set Mail Prev pointer to be the tail node\n");
+          mail->next = NULL;
+          printf("Set Mail Next poniter to be NULL\n");
+          mh = NULL;
+          mt = NULL;
           if(mh == NULL){ // if we are adding the first node
+            printf("Head is NULL\n");
             mh = mail;
+            printf("Head is now mail\n");
+            printf("Head value is %s\n", mh->node);
             mail->next = NULL;
+            printf("Mail Next Node is NULL\n");
+            mail->prev = NULL;
+            printf("Mail prev node is NULL\n");
           }
-          else{
+          else if(mt != NULL){
+            printf("Tail is NULL\n");
             mt->next = mail;
-            mail->prev = mt;
             mt = mail;
           }
+          printf("Creating new process for watchmail \n");
           pthread_create(&track, NULL, watchmail, args[1]); // create the thread to track the file
         }
       }
@@ -853,6 +869,7 @@ void watchuser(char ** args){
 }
 void watchmail(char *name){
   const char *fn = name; // this just saves the parameter to a value
+  printf("file name is %s\n", fn);
   struct timeval curr; // The struct that will hold the current time and be passed into ctime()
   int prev_size = 0; // The original, and then most recent size of the file (before the file is checked)
   struct stat fil;
@@ -860,11 +877,16 @@ void watchmail(char *name){
   char tims[1024];
   while(1){
     sleep(1);
+    printf("Slept for 1 second\n");
     struct watchmail_list *n = mh; // we need to search through our list until we find the file we want to see if it was updated
+    printf("The value of node n is %s\n", n->node);
     bool notFound = true; // tracks whether or not we've found the file we are looking for. This will handle the logic for printing everything too
     while(notFound){
-      if(strcmp(n->node, name) == 0){
+      printf("File not found yet\n");
+      if(strcmp(n->node, fn) == 0){
+        printf("WE GOT EM\n");
         s = stat(fn, &fil);
+        printf("Checking file stats\n");
         if(prev_size == 0){ // means we don't have the original size of this file
           prev_size = fil.st_size;
         } // now that we have the original size, we can check to see if the file size is bigger than it once was, and if it was, then it was changed!!
