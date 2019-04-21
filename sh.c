@@ -13,6 +13,8 @@
 #include <signal.h>
 #include <signal.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+#include <pthread.h>
 #include <time.h>
 #include <errno.h>
 #include <glob.h>
@@ -21,6 +23,7 @@
 #include <utmpx.h>
 #include "wm_list.h"
 #include "wu_list.h"
+
 
 #define buf 1024 //buf size
 #define max 2048 //max size
@@ -284,7 +287,7 @@ int sh( int argc, char **argv, char **envp )
       }
       else if(argsct == 2){
         if(firstTime){ // means this is the first time watchuser is being run in this program
-          pthread_create(&wat_thread, NULL, "watchuser", "User Thread");
+          pthread_create(&wat_thread, NULL, watchuser, "User Thread");
           !firstTime;
         }
         else{ // then we just want to add a user to the linked list
@@ -360,6 +363,7 @@ int sh( int argc, char **argv, char **envp )
     //watchmail
     else if(strcmp(args[0], "watchmail") == 0){
       printf("Executing built-in %s\n", args[0]);
+      pthread_t track;
       if(argsct == 1 || argsct > 3){
         fprintf(stderr, "Invalid argument count\n");
       }
@@ -370,7 +374,6 @@ int sh( int argc, char **argv, char **envp )
         else{
           struct watchmail_list *mail = malloc(sizeof(struct watchmail_list));
           mail->node = malloc(sizeof(args[1]));
-          pthread_t *track;
           strcpy(mail->node, args[1]);
           if(mh == NULL){ // if we are adding the first node
             mh = mail;
@@ -384,12 +387,13 @@ int sh( int argc, char **argv, char **envp )
           }
           pthread_create(&track, NULL, watchmail, args[1]); // create the thread to track the file
         }
+      }
         else if(argsct == 3){ // means we are going to stop tracking mails for a file
           if(strcmp(args[2], "off") == 0){
             struct watchmail_list *tmp;
             bool stillThere = true; // checking if the mail has been deleted yet
             tmp = mh;
-            pthread_cancel(&track);
+           // pthread_cancel(&track);
             while(stillThere){
               if(strcmp(args[1], tmp->node) == 0){ // means this is the node we want to get rid of
                 if(tmp == mh){
@@ -429,7 +433,6 @@ int sh( int argc, char **argv, char **envp )
           }
         }
       }
-    }
 
     //If the argument is not built in, the process is forked. This allows the process to be run on the terminal through mysh.
     else{
