@@ -293,7 +293,7 @@ int sh( int argc, char **argv, char **envp )
         else{ // then we just want to add a user to the linked list
           pthread_mutex_lock(&user_lock);
           struct watchuser_list *user = malloc(sizeof(struct watchuser_list)); // since the node is a pointer, we need space for it
-          user->node = malloc(sizeof(args[1])); // set the amount of space the user value has to be whatever the size of our username is
+          user->node = malloc(1024); // set the amount of space the user value has to be whatever the size of our username is
           strcpy(user->node, args[1]); // set the value of the node in the user to be the username that is passed into the command line
           if(uh == NULL){ // If there is no head, that means there is nothing in the linked list yet
             uh = user;
@@ -316,37 +316,37 @@ int sh( int argc, char **argv, char **envp )
           bool userThere = true; // this is for our while loop. Since a user can only be added to the watch list once, when we remove that user, we don't have to go through any further than that, so we can stop searching once the user is removed
           while(userThere){ // Until we delete the specified user. We will also add a case in which we get to the end of the list and the user turns out to not be in the list, though if the program is used correctly we won't reach that condition
             if(strcmp(t->node, args[1]) == 0){ // means the node that we are currently on is the one we want to remove
-              if(strcmp(t->node, uh->node) == 0){
-                if(t->next != NULL){
-                  uh = uh->next; // sets the head to be the node AFTER the OLD HEAD, that way we can just remove the temp node and be done with it!
-                } // means the head is NOT the only node left in the list
-                else{
-                  uh = NULL;
-                  ut = NULL;
-                } // means that the head is the final node in the list. Since the temp pointer is already pointing to the header node, we can set the header and tail pointers to NULL, and then just free the temp pointer
-              }
-              else if(strcmp(t->node, ut->node) == 0){ // means that the tail is the node we want to remove, so we need to move the tail pointer so that we can remove the temp node without causing any issues
-                ut = ut->prev; // sets the new tail pointer to be to the node BEFORE the OLD TAIL
-              }
-              else{ // means we aren't in the beginning of the list, or the end. Just somewhere in the middle
-                t->prev->next = t->next; // sets it so the "next" pointer of the node preceding the node about to be deleted is now set to the node AFTER the temp node
-                t->next->prev = t->prev; // sets it so the "prev" pointer of the node succeeding the node about to be deleted is now set to the node BEFORE the temp node
-              }
-              free(t->node);
-              free(t);
-              userThere = false; // Get rid of the temp node, and change our "user still there" boolean to reflect that the user is now not on the list anymore
+             if(strcmp(t->node, uh->node) == 0){
+              if(t->next != NULL){
+                uh = uh->next; // sets the head to be the node AFTER the OLD HEAD, that way we can just remove the temp node and be done with it!
+              } // means the head is NOT the only node left in the list
+              else{
+                uh = NULL;
+                ut = NULL;
+              } // means that the head is the final node in the list. Since the temp pointer is already pointing to the header node, we can set the header and tail pointers to NULL, and then just free the temp pointer
             }
-            else{ // means that the current node we are on is NOT the node that we want to delete, so we just move on to the next node
-              if(t->next == NULL){ // if we have reached the end of the list, just print that the user isn't in the list and move on
-                printf("User is not in the Watch List\n");
-                userThere = false;
-              }
-              else{ // means we aren't at the end of the list, so we just move on to the next node
-                t = t->next;
-              }
+            else if(strcmp(t->node, ut->node) == 0){ // means that the tail is the node we want to remove, so we need to move the tail pointer so that we can remove the temp node without causing any issues
+              ut = ut->prev; // sets the new tail pointer to be to the node BEFORE the OLD TAIL
+            }
+            else{ // means we aren't in the beginning of the list, or the end. Just somewhere in the middle
+              t->prev->next = t->next; // sets it so the "next" pointer of the node preceding the node about to be deleted is now set to the node AFTER the temp node
+              t->next->prev = t->prev; // sets it so the "prev" pointer of the node succeeding the node about to be deleted is now set to the node BEFORE the temp node
+            }
+            free(t->node);
+            free(t);
+            userThere = false; // Get rid of the temp node, and change our "user still there" boolean to reflect that the user is now not on the list anymore
+          }
+          else{ // means that the current node we are on is NOT the node that we want to delete, so we just move on to the next node
+            if(t->next == NULL){ // if we have reached the end of the list, just print that the user isn't in the list and move on
+              printf("User is not in the Watch List\n");
+              userThere = false;
+            }
+            else{ // means we aren't at the end of the list, so we just move on to the next node
+              t = t->next;
             }
           }
-          pthread_mutex_unlock(&user_lock);
+        }
+        pthread_mutex_unlock(&user_lock);
         }
         else{
           fprintf(stderr, "Included three arguments without removing a user \n");
@@ -373,11 +373,10 @@ int sh( int argc, char **argv, char **envp )
         }
         else{
           struct watchmail_list *mail = malloc(sizeof(struct watchmail_list));
-          mail->node = malloc(sizeof(args[1]));
+          mail->node = malloc(1024);
           strcpy(mail->node, args[1]);
           if(mh == NULL){ // if we are adding the first node
             mh = mail;
-            mt = mail; // since the first node is technically both the beginning and the end
             mail->next = NULL;
           }
           else{

@@ -26,5 +26,6 @@ void watchuser(char **args);
 void watchmail(char *name);
 void sig_child_handler(int signal);
 
+
 #define PROMPTMAX 32
 #define MAXARGS 10
