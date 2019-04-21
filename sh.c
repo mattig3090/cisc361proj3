@@ -23,15 +23,14 @@
 #include <utmpx.h>
 #include "wm_list.h"
 #include "wu_list.h"
-
-
+#include "t_args.h"
 #define buf 1024 //buf size
 #define max 2048 //max size
 
-struct watchuser_list *uh = NULL; // watchuser linked list head
-struct watchuser_list *ut = NULL; // watchuser linked list tail
-struct watchmail_list *mh = NULL; // watchmail linked list head
-struct watchmail_list *mt = NULL; // watchmail linked list tail
+struct watchuser_list *uh = NULL;
+struct watchuser_list *ut = NULL;
+struct watchmail_list *mh = NULL;
+struct watchmail_list *mt = NULL;
 pthread_mutex_t user_lock;
 
 int sh( int argc, char **argv, char **envp )
@@ -375,32 +374,35 @@ int sh( int argc, char **argv, char **envp )
         else{
           struct watchmail_list *mail = malloc(sizeof(struct watchmail_list));
           mail->node = malloc(sizeof(args[1])+1);
-          printf("allocated space to mail node!\n");
+          //printf("allocated space to mail node!\n");
           strcpy(mail->node, args[1]);
-          printf("Copied information into mail node!\n");
+          //printf("Copied information into mail node!\n");
           mail->prev = mt;
-          printf("set Mail Prev pointer to be the tail node\n");
+          //printf("set Mail Prev pointer to be the tail node\n");
           mail->next = NULL;
-          printf("Set Mail Next poniter to be NULL\n");
+          //printf("Set Mail Next poniter to be NULL\n");
           mh = NULL;
           mt = NULL;
           if(mh == NULL){ // if we are adding the first node
-            printf("Head is NULL\n");
+            //printf("Head is NULL\n");
             mh = mail;
-            printf("Head is now mail\n");
-            printf("Head value is %s\n", mh->node);
+            //printf("Head is now mail\n");
+            //printf("Head value is %s\n", mh->node);
             mail->next = NULL;
-            printf("Mail Next Node is NULL\n");
+            //printf("Mail Next Node is NULL\n");
             mail->prev = NULL;
-            printf("Mail prev node is NULL\n");
+            //printf("Mail prev node is NULL\n");
           }
           else if(mt != NULL){
-            printf("Tail is NULL\n");
+            //printf("Tail is NULL\n");
             mt->next = mail;
             mt = mail;
           }
-          printf("Creating new process for watchmail \n");
-          pthread_create(&track, NULL, watchmail, args[1]); // create the thread to track the file
+          //printf("Creating new process for watchmail \n");
+          struct t_args wm_args;
+          wm_args.filen = args[1];
+          wm_args.h = mh;
+          pthread_create(&track, NULL, watchmail, (void *)&wm_args); // create the thread to track the file
         }
       }
         else if(argsct == 3){ // means we are going to stop tracking mails for a file
@@ -867,9 +869,10 @@ void watchuser(char ** args){
     }
   }
 }
-void watchmail(char *name){
-  const char *fn = name; // this just saves the parameter to a value
-  printf("file name is %s\n", fn);
+void watchmail(void *args){
+  struct t_args *a = (struct t_args *)args;
+  const char *fn = a->filen; // this just saves the parameter to a value
+  //printf("file name is %s\n", fn);
   struct timeval curr; // The struct that will hold the current time and be passed into ctime()
   int prev_size = 0; // The original, and then most recent size of the file (before the file is checked)
   struct stat fil;
@@ -877,41 +880,51 @@ void watchmail(char *name){
   char tims[1024];
   while(1){
     sleep(1);
-    printf("Slept for 1 second\n");
-    struct watchmail_list *n = mh; // we need to search through our list until we find the file we want to see if it was updated
-    printf("The value of node n is %s\n", n->node);
+    //printf("Slept for 1 second\n");
+    struct watchmail_list *n = a->h; // we need to search through our list until we find the file we want to see if it was updated
+    //printf("The value of node n is %s\n", n->node);
     bool notFound = true; // tracks whether or not we've found the file we are looking for. This will handle the logic for printing everything too
     while(notFound){
-      printf("File not found yet\n");
+      //printf("File not found yet\n");
       if(strcmp(n->node, fn) == 0){
-        printf("WE GOT EM\n");
-        s = stat(fn, &fil);
-        printf("Checking file stats\n");
-        if(prev_size == 0){ // means we don't have the original size of this file
-          prev_size = fil.st_size;
-        } // now that we have the original size, we can check to see if the file size is bigger than it once was, and if it was, then it was changed!!
-        if(fil.st_size > prev_size){ // means the file is different!
-          gettimeofday(&curr, NULL); // the value is saved into "curr"
-          strcpy(tims,ctime(curr.tv_sec));
-          printf("BEEP\a You've got Mail in %s at %s\n", fn, tims);
-          prev_size = fil.st_size;
-          notFound = false;
-        }
-        else{
-          printf("File %s is unchanged\n", fn);
-          notFound = false;
-        }
+        //printf("WE GOT EM\n");
+        notFound = false;
+        break;
       }
       else{
         if(n->next == NULL && notFound){
           printf("File not found\n");
-          notFound = false; // basically means we got to the end of our list and didn't find the file
+          //notFound = false;
           pthread_exit(&exit);
         }
         else{
           n = n->next;
         }
       }
+    }
+    if(notFound == false){
+      //printf("We found it!\n");
+      stat(fn, &fil);
+      //printf("Checking file stats\n");
+      //printf("%i\n", fil.st_size);
+      if(prev_size == 0){ // means we don't have the original size of this file
+        //printf("Setting current file size\n");
+        prev_size = fil.st_size;
+      } // now that we have the original size, we can check to see if the file size is bigger than it once was, and if it was, then it was changed!!
+      if(fil.st_size > prev_size){ // means the file is different!
+        gettimeofday(&curr, NULL); // the value is saved into "curr"
+        strcpy(tims,ctime(curr.tv_sec));
+        printf("BEEP\a You've got Mail in %s at %s\n", fn, tims);
+        prev_size = fil.st_size;
+        notFound = false;
+      }
+      /*else{
+        //printf("File %s is unchanged\n", fn);
+        //notFound = false;
+      }*/
+    }
+    else{
+      pthread_exit(&exit);
     }
   }
 }
