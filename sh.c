@@ -9,6 +9,7 @@
 #include <dirent.h>
 #include <sys/types.h>
 #include <sys/wait.h>
+#include <sys/param.h>
 #include <sys/time.h>
 #include <signal.h>
 #include <signal.h>
@@ -24,6 +25,9 @@
 #include "wm_list.h"
 #include "wu_list.h"
 #include "t_args.h"
+#ifdef HAVE_KSTAT
+#include <kstat.h>
+#endif
 #define buf 1024 //buf size
 #define max 2048 //max size
 
@@ -45,6 +49,7 @@ int sh( int argc, char **argv, char **envp )
   char *homedir;
   struct pathelement *pathlist;
   char * prev_enviornment = malloc(sizeof(prev_enviornment)); 
+  int noclobber = 0;
   bool firstTime = true; // Indicates if this is the first time that watchuser is being run
 
   struct watchuser_list *uh; // watchuser linked list head
@@ -78,6 +83,7 @@ int sh( int argc, char **argv, char **envp )
   pathlist = get_path();
 
   while ( go ){
+    int found_pipe = 0;
     //used to handle ctrl z and ctrl c
     signal(SIGINT, sigintHandler); //sig init
     signal(SIGTSTP, signalSTPHandler); //sig stop
@@ -96,6 +102,9 @@ int sh( int argc, char **argv, char **envp )
     }
 
     newline(cmdline); //new line cmd
+    if((strstr(cmdline, "|") != NULL) || (strstr(cmdline, "|&") != NULL)){
+      found_pipe = 1;
+    }
     int argsct = search(cmdline, args); //search cmd for args
 
 /* Start of the checks for build in commands.*/
@@ -277,6 +286,21 @@ int sh( int argc, char **argv, char **envp )
         perror("setenv");
       }
     }
+    //noclobber
+    else if(strcmp(args[0], "noclobber") == 0){
+      printf("Executing built-in%s\n", args[0]);
+      if(argsct > 1){
+        fprintf(stderr, "Error: too many arguments.\n");
+      }
+      //reset noclobber to opposite value than before
+      if(noclobber == 1){
+        noclobber = 0;
+      }
+      else{
+        noclobber = 1;
+      }
+      printf("noclobber = %d\n", noclobber);
+    }
     //watchuser
     else if(strcmp(args[0], "watchuser") == 0){ // this should handle adding and removing the users, watchuser ITSELF should just track whether somebody has logged on or not 
       printf("Executing built-in %s\n", args[0]);
@@ -292,7 +316,7 @@ int sh( int argc, char **argv, char **envp )
         else{ // then we just want to add a user to the linked list
           pthread_mutex_lock(&user_lock);
           struct watchuser_list *user = malloc(sizeof(struct watchuser_list)); // since the node is a pointer, we need space for it
-          user->node = malloc(sizeof(args[1])+1); // set the amount of space the user value has to be whatever the size of our username is
+          user->node = malloc(1024); // set the amount of space the user value has to be whatever the size of our username is
           strcpy(user->node, args[1]); // set the value of the node in the user to be the username that is passed into the command line
           user->prev = ut;
           if(uh == NULL){ // means there is nothing in the head
@@ -373,7 +397,7 @@ int sh( int argc, char **argv, char **envp )
         }
         else{
           struct watchmail_list *mail = malloc(sizeof(struct watchmail_list));
-          mail->node = malloc(sizeof(args[1])+1);
+          mail->node = malloc(1024);
           //printf("allocated space to mail node!\n");
           strcpy(mail->node, args[1]);
           //printf("Copied information into mail node!\n");
@@ -461,16 +485,46 @@ int sh( int argc, char **argv, char **envp )
       if (p == ""){   //if which doesnt find the process don't fork it.
         printf("\n");
       }
+      //was the piping symbol found?
+      else if(found_pipe == 1){
+        pipemain(args);
+      }
       else if (p != ""){ // means that the "which" command found the process and we can fork it 
         pid = fork(); //fork it
+        int status = 0;
         bool isBack = false; // our verification that we are either running a process in the foreground or background 
-        if(strcmp(args[argc - 1], "&") == 0){
+        if(strcmp(args[argsct - 1], "&") == 0){
           isBack = true; // sets our background flag to true
-          args[argc-1] = NULL; // and then gets rid of the ampersand, that way we can just pass the argument into the background process... thing...
-          argc--;
+          args[argsct-1] = NULL; // and then gets rid of the ampersand, that way we can just pass the argument into the background process... thing...
+          argsct--;
         } // means that we have a & at the end of the commandline, so this process is going to be run in the background
-        if (pid == 0){ // means that we are in the child process
-          int status;
+        if (pid == 0){
+          int redir = redirection(args,cwd1,noclobber);
+          if(redir == 0){ //checking for redirection
+            kill(getpid(),SIGKILL);
+          } else{ //if redirection is found
+            //reset args as appropriate so we can exec
+            char *cur_arg = args[0];
+            int i = 0;
+            while(cur_arg != NULL){
+              if((strcmp(cur_arg, ">") == 0) || (strcmp(cur_arg, ">&") == 0) || (strcmp(cur_arg, ">>") == 0) || (strcmp(cur_arg, ">>&") == 0) || (strcmp(cur_arg, "<") == 0)){
+                args[i] = NULL;
+                args[i+1] = NULL;
+                break;
+              }
+              else{
+                i++;
+                cur_arg = args[i];
+              }
+            }
+          }
+          if(isBack){ // means that this process is going to be run in the background
+            fclose(stdin);
+            open("/dev/null", O_RDONLY);
+            execvp(*args, args);
+            fprintf(stderr, "unknown command: %s\n", args[0]);
+            exit(1);
+          }
           if (strcmp("ls", args[0]) == 0 && wildcardhelper(args_to_string(args, argsct)) == 1){
             int l=1;
             int counter;
@@ -524,13 +578,6 @@ int sh( int argc, char **argv, char **envp )
               }
               l++;
             }
-          }
-          if(isBack){ // means that this process is going to be run in the background
-            fclose(stdin);
-            open("/dev/null", O_RDONLY);
-            execvp(*args, args);
-            fprintf(stderr, "unknown command: %s\n", args[0]);
-            exit(1);
           }
           else {
             status = execvp(p, args); // run the external command with the arguments
@@ -874,10 +921,10 @@ void watchmail(void *args){
   const char *fn = a->filen; // this just saves the parameter to a value
   //printf("file name is %s\n", fn);
   struct timeval curr; // The struct that will hold the current time and be passed into ctime()
-  int prev_size = 0; // The original, and then most recent size of the file (before the file is checked)
+  int prev_size = -1; // The original, and then most recent size of the file (before the file is checked)
   struct stat fil;
   int s;
-  char tims[1024];
+  char tims[40];
   while(1){
     sleep(1);
     //printf("Slept for 1 second\n");
@@ -894,8 +941,9 @@ void watchmail(void *args){
       else{
         if(n->next == NULL && notFound){
           printf("File not found\n");
+          break;
           //notFound = false;
-          pthread_exit(&exit);
+          //pthread_exit(&exit);
         }
         else{
           n = n->next;
@@ -907,13 +955,13 @@ void watchmail(void *args){
       stat(fn, &fil);
       //printf("Checking file stats\n");
       //printf("%i\n", fil.st_size);
-      if(prev_size == 0){ // means we don't have the original size of this file
+      if(prev_size == -1){ // means we don't have the original size of this file
         //printf("Setting current file size\n");
         prev_size = fil.st_size;
       } // now that we have the original size, we can check to see if the file size is bigger than it once was, and if it was, then it was changed!!
       if(fil.st_size > prev_size){ // means the file is different!
         gettimeofday(&curr, NULL); // the value is saved into "curr"
-        strcpy(tims,ctime(curr.tv_sec));
+        strcpy(tims,ctime(&curr.tv_sec));
         printf("BEEP\a You've got Mail in %s at %s\n", fn, tims);
         prev_size = fil.st_size;
         notFound = false;
@@ -933,4 +981,195 @@ void sig_child_handler(int sig){
   while(waitpid((pid_t)(-1), 0, WNOHANG) > 0){
     errno = s_err;
   }
+}
+
+//This is the function for redirection  
+int redirection(char **args, char *thisdir, int noclobber){
+  int i = 0;
+  char *thisarg = args[0];
+  while (thisarg != NULL){
+    if (!((strcmp(thisarg, ">") == 0) || (strcmp(thisarg, ">&") == 0) || (strcmp(thisarg, ">>") == 0) || (strcmp(thisarg, ">>&") == 0) || (strcmp(thisarg, "<") == 0))){
+        i++;
+        thisarg = args[i];
+    }
+    else{
+        break;
+    }
+  }
+  if(args[i+1] == NULL) {
+      return 1;
+  } else {
+    if (args[i+1][0] != '/'){
+      char *tmp = malloc(256);
+      strcpy(tmp,thisdir);
+      strcat(tmp,"/");
+      strcat(tmp,args[i+1]);
+      strcpy(args[i+1],tmp);
+    }
+
+    int fds;
+
+    if(strcmp(thisarg, ">") == 0){
+      if(access(args[i+1],F_OK != -1) && (noclobber == 1)){
+        printf("Can't overwrite existing file if noclobber is turned on.\n");
+        return 0;
+      }
+      fds = open(args[i+1], O_CREAT| O_WRONLY| O_TRUNC, S_IRWXU);
+      close(1);
+      dup(fds);
+      close(fds);
+      return 1;
+    }
+
+    else if(strcmp(thisarg, ">&") == 0){
+      if(access(args[i+1],F_OK != -1) && (noclobber == 1)){
+        printf("Can't overwrite existing file if noclobber is turned on.\n");
+        return 0;
+      }
+      fds = open(args[i+1], O_CREAT| O_WRONLY| O_TRUNC, S_IRWXU);
+      close(1);
+      close(2);
+      dup(fds);
+      dup(fds);
+      close(fds);
+      return 1;
+    }
+
+    else if(strcmp(thisarg, ">>") == 0){
+        if (access(args[i+1],F_OK) == -1){
+            if (noclobber == 1) {
+                printf("Can't overwrite or create files with >> if noclobber is turned on.\n");
+                return 0;
+            }
+            fds = open(args[i+1], O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+        }
+        else{
+            fds = open(args[i+1], O_RDWR | O_APPEND, S_IRUSR | S_IWUSR);
+        }
+        close(1);
+        dup(fds);
+        close(fds);
+        return 1;
+    }
+
+    else if(strcmp(thisarg, ">>&") == 0){
+        if (access(args[i+1],F_OK) == -1){
+            if (noclobber == 1) {
+                printf("Can't overwrite or create files with >>& if noclobber is turned on.\n");
+                return 0; 
+            }
+            fds = open(args[i+1], O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+        }
+        else{
+            fds = open(args[i+1], O_RDWR | O_APPEND, S_IRUSR | S_IWUSR);
+        }
+        close(1);
+        close(2);
+        dup(fds);
+        dup(fds);
+        close(fds);
+        return 1;
+    }
+
+    else if(strcmp(thisarg, "<") == 0){
+      fds = open(args[i+1], O_RDWR | S_IRUSR | S_IWUSR);
+      close(0);
+      dup(fds);
+      close(fds);
+      return 1;
+    }
+    fds = open("/dev/tty",O_WRONLY);
+    return 1;
+  }
+}
+
+void source(int pfd[], char **cmd, char *symbol){
+  int pid;
+  pid = fork();
+  switch(pid){
+    //child
+    case 0:
+      //checks to see if needs to pipe stderr
+      if(strcmp(symbol, "|&") == 0){
+        close(2);
+      }
+      close(1);
+      dup(pfd[1]);
+      close(pfd[0]);
+      execvp(cmd[0], cmd);
+      perror(cmd[0]);
+    //parent
+    default:
+      break;
+    //error
+    case -1:
+      perror("fork"); 
+      exit(1);
+  }
+}
+
+void dest(int pfd[], char **cmd, char *symbol){
+  int pid;
+  pid = fork();
+  switch(pid){
+    //child
+    case 0:
+      //check to so if needs to pipe stderr
+      if(strcmp(symbol, "|&") == 0){
+        close(2);
+      }
+      close(0);
+      dup(pfd[0]);
+      close(pfd[1]);
+      execvp(cmd[0], cmd);
+      perror(cmd[0]);
+    //parent
+    default:
+      break;
+    //error
+    case -1:
+      perror("fork"); 
+      exit(1);
+  }
+}
+
+void pipemain(char **args){
+  char **command1 = calloc(MAXARGS, sizeof(char*)); //first command for piping
+  char **command2 = calloc(MAXARGS, sizeof(char*)); //second command for piping
+  char *symbol = calloc(MAX_CANON, sizeof(char*));
+  int i = 0;  //used for iterating through args
+  int j = 0;  //used for adding to command2
+  int flag = 0;
+  //separate commands
+  while(flag == 0){
+    if((strcmp(args[i], "|") == 0) || (strcmp(args[i], "|&") == 0)){
+      symbol = args[i];
+      i++;
+      flag = 1;
+      break;
+    }
+    else{
+      command1[i] = args[i];
+      i++;
+    }
+  }
+  while(args[i] != NULL){
+    command2[j] = args[i];
+    i++;
+    j++;
+  }
+  //run piping
+  int pid;
+  int status;
+  int fds[2];
+  pipe(fds);
+  source(fds, command1, symbol);
+  dest(fds, command2, symbol);
+  close(fds[0]);
+  close(fds[1]);
+  //pick up dead children
+  while ((pid = wait(&status)) != -1){
+    fprintf(stderr, "process %d exits with %d\n", pid, WEXITSTATUS(status)); 
+  }
+  //exit(0);
 }

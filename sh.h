@@ -25,6 +25,10 @@ char *args_to_string(char **args, int arg_count);
 void watchuser(char **args);
 void watchmail(void *args);
 void sig_child_handler(int signal);
+int redirection(char **args, char *cur_dir, int noclobber);
+void source(int pfd[], char **cmd, char *symbol);
+void dest(int pfd[], char **cmd, char *symbol);
+void pipemain(char **args);
 
 
 #define PROMPTMAX 32
