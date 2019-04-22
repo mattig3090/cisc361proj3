@@ -1,3 +1,4 @@
+// Anthony Sette and Matthew Grossman
 struct watchuser_list{
     char *node;
     struct watchuser_list *next;

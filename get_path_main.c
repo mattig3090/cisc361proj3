@@ -1,4 +1,4 @@
-//Anthony Sette
+//Anthony Sette and Matthew Grossman
 #include "get_path.h"
 
 main()

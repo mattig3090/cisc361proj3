@@ -1,11 +1,5 @@
-//Anthony Sette
-/*
-  get_path.c
-  Ben Miller
+//Anthony Sette and Matthew Grossman
 
-  Just a little sample function that gets the PATH env var, parses it and
-  puts "components" into a linked list, which is returned.
-*/
 #include "get_path.h"
 
 struct pathelement *get_path()

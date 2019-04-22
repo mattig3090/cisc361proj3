@@ -1,3 +1,4 @@
+// Anthony Sette and Matthew Grossman
 struct watchmail_list{
     char *node;
     struct watchmail_list *next;

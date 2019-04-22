@@ -1,9 +1,5 @@
-//Anthony Sette
-/* 
-  get_path.h
-  Ben Miller
+//Anthony Sette and Matthew Grossman
 
-*/
 #include <stdio.h>
 #include <unistd.h>
 #include <stdlib.h>
